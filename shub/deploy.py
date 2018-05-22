@@ -6,6 +6,7 @@ import tempfile
 from six.moves.urllib.parse import urljoin
 
 import click
+import requests
 # Not used in code but needed in runtime, don't remove!
 import setuptools
 _1 = setuptools  # NOQA
@@ -72,6 +73,7 @@ def cli(target, version, debug, egg, build_egg, verbose, keep_log):
     conf, image = load_shub_config(), None
     if not build_egg:
         create_scrapinghub_yml_wizard(conf, target=target)
+    _detect_pending_deployments(target=target, conf=conf)
     image = conf.get_target_conf(target).image
     if not image:
         deploy_cmd(target, version, debug, egg, build_egg, verbose, keep_log,
@@ -162,3 +164,26 @@ def _build_egg():
     run_python(['setup.py', 'clean', '-a', 'bdist_egg', '-d', d])
     egg = glob.glob(os.path.join(d, '*.egg'))[0]
     return egg, d
+
+
+def _detect_pending_deployments(target, conf):
+    targetconf = conf.get_target_conf(target)
+    url_pattern = '{endpoint}v2/projects/{project_id}/deployment' \
+                  '?state__in=in_progress'
+    url = url_pattern.format(
+        endpoint=targetconf.endpoint,
+        project_id=targetconf.project_id,
+    )
+    auth = (targetconf.apikey, '')
+    resp = requests.get(url=url, auth=auth, timeout=300)
+    resp.raise_for_status()
+    data = resp.json()
+    if data['count']:
+        click.echo(
+            'WARNING: There is another deployment in process:\n'
+            'Version: {}\n'
+            'Author: {}'.format(
+                data['results'][0]['version'],
+                data['results'][0]['user']['username']
+            )
+        )
